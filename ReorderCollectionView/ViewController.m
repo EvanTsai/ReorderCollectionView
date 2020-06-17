@@ -58,6 +58,14 @@
     return cell;
 }
 
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    NSLog(@"offset: %@\n", NSStringFromCGPoint(scrollView.contentOffset));
+}
 
+- (void)collectionView:(UICollectionView *)collectionView moveItemAtIndexPath:(NSIndexPath *)sourceIndexPath toIndexPath:(NSIndexPath *)destinationIndexPath {
+    id m = _dataArr[sourceIndexPath.row];
+    [_dataArr removeObjectAtIndex:sourceIndexPath.item];
+    [_dataArr insertObject:m atIndex:destinationIndexPath.item];
+}
 
 @end

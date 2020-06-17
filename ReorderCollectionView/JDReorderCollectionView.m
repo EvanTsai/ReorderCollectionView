@@ -10,32 +10,27 @@
 #import "JDCellReorderable.h"
 
 #define kAttachAnimationDuration    0.25f
+#define kEdgeStayThreshold          0.2f
+#define kEdgeWidthThreshold         20.f
+#define kMoveStep                   2.5f
+#define kMoveAccelerateThreshold                   2.f
 
-//@interface JDReorderOperation : NSObject
-//
-//@property (nonatomic, strong) NSIndexPath *moveIndexPath;
-//@property (nonatomic, assign) JDReorderStatus status;
-//
-//
-//@end
-//
-//@implementation JDReorderOperation
-//
-//@end
+typedef NS_ENUM(NSUInteger, JDEdgeState) {
+    JDEdgeStateNone,
+    JDEdgeStateTesting,
+    JDEdgeStateTriggered,
+};
 
 @interface JDReorderCollectionView ()
 
 @property (nonatomic, strong) UILongPressGestureRecognizer *longPressGes;
 @property (nonatomic, strong) NSIndexPath *originalIndexPath;
 @property (nonatomic, strong) NSIndexPath *currentIndexPath;
-@property (nonatomic, strong) NSIndexPath *tmpIndexPath;
-
 @property (nonatomic, strong) UIView *snapshotView;
-
-@property (nonatomic, assign) BOOL inSwap;
-@property (nonatomic, assign) BOOL shouldCancelMove;
-//@property (nonatomic, strong) NSMutableArray <JDReorderOperation *> *operations;
-@property (nonatomic, assign) JDReorderStatus status;
+@property (nonatomic, assign) JDEdgeState edgeState;
+@property (nonatomic, assign) NSInteger lastEdge;
+@property (nonatomic, assign) NSTimeInterval edgeTestBeginTime;
+@property (nonatomic, strong) CADisplayLink *displayLink;
 @end
 
 @implementation JDReorderCollectionView
@@ -45,7 +40,6 @@
     _enableReordering = enableReordering;
     if (!self.longPressGes.view) {
         [self addGestureRecognizer:self.longPressGes];
-//        _operations = [NSMutableArray array];
     }
     self.longPressGes.enabled = _enableReordering;
 }
@@ -101,10 +95,6 @@
         [(id)fromCell willBeginDragging];
     }
     
-//    if ([fromCell respondsToSelector:@selector(enterReorderingMode)]) {
-//        [(id)fromCell enterReorderingMode];
-//    }
-    
     [UIView animateWithDuration:kAttachAnimationDuration delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         _snapshotView.center = location;
     } completion:^(BOOL finished) {
@@ -114,15 +104,10 @@
 
 
 - (void)handleLocationEnded:(CGPoint)location {
-    UICollectionViewCell *toCell;
-    NSLog(@"swap in process: %d", _inSwap);
-    if (_status == JDReorderStatusMoved) {
-        // 说明动画没有结束
-        toCell = [self cellForItemAtIndexPath:_tmpIndexPath];
-
-    } else {
-        toCell = [self cellForItemAtIndexPath:_currentIndexPath];
-    }
+    [self resetWindowAndEdge];
+    [self invalidateDisplayLink];
+    
+    UICollectionViewCell *toCell = [self cellForItemAtIndexPath:_currentIndexPath];
     if ([toCell respondsToSelector:@selector(willEndDragging)]) {
         [(id)toCell willEndDragging];
     }
@@ -133,13 +118,12 @@
         _snapshotView.frame = endFrame;
     } completion:^(BOOL finished) {
         [_snapshotView removeFromSuperview];
+        _snapshotView = nil;
         _currentIndexPath = nil;
         _originalIndexPath = nil;
-        _tmpIndexPath = nil;
         if ([toCell respondsToSelector:@selector(didEndDragging)]) {
             [(id)toCell didEndDragging];
         }
-        _status = JDReorderStatusIdle;
     }];
 }
 
@@ -149,24 +133,144 @@
     _snapshotView.center = location;
     NSIndexPath *newIp = [self indexPathForItemAtPoint:location];
     if (!newIp) return;
+    
     if (![newIp isEqual:_currentIndexPath] ) { //}&& !_inSwap) {
         
         [self performBatchUpdates:^{
-        
-            if (_status == JDReorderStatusMoved) {
-                [self moveItemAtIndexPath:_tmpIndexPath toIndexPath:newIp];
-            } else {
-                [self moveItemAtIndexPath:_currentIndexPath toIndexPath:newIp];
-            }
-            _tmpIndexPath = newIp;
-            _status = JDReorderStatusMoved;
+            [self moveItemAtIndexPath:_currentIndexPath toIndexPath:newIp];
+            [self.dataSource collectionView:self moveItemAtIndexPath:_currentIndexPath toIndexPath:newIp];
+            _currentIndexPath = newIp;
         } completion:^(BOOL finished) {
             NSLog(@"finished: %d", finished);
-            _currentIndexPath = _tmpIndexPath;
-            _status = JDReorderStatusCompleted;
         }];
     }
+    [self handleEdgeCasesWithPoint:location];
 }
+
+- (void)handleEdgeCasesWithPoint:(CGPoint)point {
+
+    CGPoint relativePoint = [self convertPoint:point toView:self.window];
+    CGRect selfRect = [self.superview convertRect:self.frame fromView:self.window];
+    if (!CGRectContainsPoint(selfRect, relativePoint)) return;
+    
+    CGFloat maxX = CGRectGetMaxX(selfRect);
+    CGFloat minX = CGRectGetMinX(selfRect);
+    
+    NSInteger edge = 0;
+    if (relativePoint.x - minX < kEdgeWidthThreshold) {
+        // 左边边界
+        edge = -1;
+    } else if (maxX - relativePoint.x < kEdgeWidthThreshold) {
+        // 右边边界
+        edge = 1;
+    }
+    if (edge != 1 && edge != -1) {
+        // 不管以前是什么，只要现在不在edge就reset
+        [self invalidateDisplayLink];
+        [self resetWindowAndEdge];
+        return;
+    }
+    if ((_lastEdge == 1 && edge == -1) || (_lastEdge == -1 && edge == 1)) {
+      // 从一侧edge切换到另一侧的edge，就需要变成none，重新走一遍下面的判断
+        [self invalidateDisplayLink];
+        _edgeState = JDEdgeStateNone;
+    }
+    // 走到这的case就是要么是从中间新到一侧edge，要么是持续呆在了一侧的edge
+    // 表示开启
+    if (_edgeState == JDEdgeStateTesting) {
+        // 之前有
+        NSTimeInterval ctime = [self currentTime];
+        if (ctime < kEdgeStayThreshold) return;
+        _edgeState = JDEdgeStateTriggered;
+        // change time to the triggered time
+        _edgeTestBeginTime = ctime;
+        [self startMovement];
+    } else if (_edgeState == JDEdgeStateNone) {
+        // 之前没有
+        _edgeTestBeginTime = [self currentTime];
+        _edgeState = JDEdgeStateTesting;
+    } else if (_edgeState == JDEdgeStateTriggered) {
+        // 之前有并且已经开始滚动了
+        // keep scrolling if possible
+//        [self startMovement];
+    }
+    _lastEdge = edge;
+}
+
+
+
+- (void)resetWindowAndEdge {
+    _lastEdge = 0;
+    _edgeState = JDEdgeStateNone;
+    _edgeTestBeginTime = 0;
+}
+
+- (void)invalidateDisplayLink {
+    [_displayLink invalidate];
+    _displayLink = nil;
+}
+
+
+- (void)startMovement {
+    _displayLink = nil;
+    [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+}
+
+
+- (NSTimeInterval)currentTime {
+    return [NSProcessInfo processInfo].systemUptime;
+}
+
+- (CADisplayLink *)displayLink {
+    if (!_displayLink) {
+        _displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(makeMovement:)];
+    }
+    return _displayLink;
+}
+
+- (void)makeMovement:(CADisplayLink *)displayLink {
+    NSLog(@"movement");
+    CGPoint currentOffset = self.contentOffset;
+    CGFloat targetOffsetX = currentOffset.x;
+    CGRect oldFrame = _snapshotView.frame;
+    CGFloat speed =  ([self currentTime] - _edgeTestBeginTime > kMoveAccelerateThreshold) ? kMoveStep : kMoveStep * 2;
+    if (_lastEdge == 1) {
+        // 右边
+        CGFloat maxOffsetX = [self maxOffsetX];
+        if (currentOffset.x + kMoveStep < maxOffsetX) {
+            targetOffsetX += kMoveStep;
+            oldFrame.origin.x += kMoveStep;
+        } else {
+            [self invalidateDisplayLink];
+        }
+    } else {
+        // 左边
+        CGFloat minOffsetX = [self minOffsetX];
+        
+        if (currentOffset.x - kMoveStep > minOffsetX) {
+            targetOffsetX -= kMoveStep;
+            oldFrame.origin.x -= kMoveStep;
+        } else {
+            [self invalidateDisplayLink];
+        }
+    }
+    // offset在变更的同时，_snapshotView也要跟这变位置；
+    _snapshotView.frame = oldFrame;
+    // 同时也要继续进行交换。所以把contentOffset造成的gesture位置的变更，直接传给handleLocationChange方法，继续进行交换
+    [self handleLocationChange:_snapshotView.center];
+    [self setContentOffset:CGPointMake(targetOffsetX, 0)];
+    //  change snapshot view position
+}
+
+- (CGFloat)minOffsetX {
+    return -self.contentInset.left;
+}
+
+- (CGFloat)maxOffsetX {
+    return self.contentSize.width - self.frame.size.width + self.contentInset.right - self.contentInset.left;
+//    return -self.contentInset.left + self.contentSize.width + self.contentInset.right;
+}
+
  /**/
 
 
