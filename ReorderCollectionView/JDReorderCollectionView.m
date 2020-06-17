@@ -11,8 +11,9 @@
 
 #define kAttachAnimationDuration    0.25f
 #define kEdgeStayThreshold          0.2f
-#define kEdgeWidthThreshold         20.f
-#define kMoveStep                   2.5f
+#define kEdgeWidthThreshold         30.f
+#define kMoveLongStep               6.f
+#define kMoveShortStep              2.8f
 #define kMoveAccelerateThreshold                   2.f
 
 typedef NS_ENUM(NSUInteger, JDEdgeState) {
@@ -233,13 +234,13 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
     CGPoint currentOffset = self.contentOffset;
     CGFloat targetOffsetX = currentOffset.x;
     CGRect oldFrame = _snapshotView.frame;
-    CGFloat speed =  ([self currentTime] - _edgeTestBeginTime > kMoveAccelerateThreshold) ? kMoveStep : kMoveStep * 2;
+    CGFloat speed =  [self speed];
     if (_lastEdge == 1) {
         // 右边
         CGFloat maxOffsetX = [self maxOffsetX];
-        if (currentOffset.x + kMoveStep < maxOffsetX) {
-            targetOffsetX += kMoveStep;
-            oldFrame.origin.x += kMoveStep;
+        if (currentOffset.x + speed < maxOffsetX) {
+            targetOffsetX += speed;
+            oldFrame.origin.x += speed;
         } else {
             [self invalidateDisplayLink];
         }
@@ -247,9 +248,9 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
         // 左边
         CGFloat minOffsetX = [self minOffsetX];
         
-        if (currentOffset.x - kMoveStep > minOffsetX) {
-            targetOffsetX -= kMoveStep;
-            oldFrame.origin.x -= kMoveStep;
+        if (currentOffset.x - speed > minOffsetX) {
+            targetOffsetX -= speed;
+            oldFrame.origin.x -= speed;
         } else {
             [self invalidateDisplayLink];
         }
@@ -260,6 +261,14 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
     [self handleLocationChange:_snapshotView.center];
     [self setContentOffset:CGPointMake(targetOffsetX, 0)];
     //  change snapshot view position
+}
+
+- (CGFloat)speed {
+    CGFloat delta = [self currentTime] - _edgeTestBeginTime;
+    CGFloat speed = MIN(MAX(delta * 3, kMoveShortStep), kMoveLongStep);
+    return speed;
+//    CGFloat speed =  ([self currentTime] - _edgeTestBeginTime > kMoveAccelerateThreshold) ? kMoveLongStep : kMoveShortStep;
+//    return speed;
 }
 
 - (CGFloat)minOffsetX {
