@@ -11,6 +11,18 @@
 
 #define kAttachAnimationDuration    0.25f
 
+//@interface JDReorderOperation : NSObject
+//
+//@property (nonatomic, strong) NSIndexPath *moveIndexPath;
+//@property (nonatomic, assign) JDReorderStatus status;
+//
+//
+//@end
+//
+//@implementation JDReorderOperation
+//
+//@end
+
 @interface JDReorderCollectionView ()
 
 @property (nonatomic, strong) UILongPressGestureRecognizer *longPressGes;
@@ -22,6 +34,7 @@
 
 @property (nonatomic, assign) BOOL inSwap;
 @property (nonatomic, assign) BOOL shouldCancelMove;
+//@property (nonatomic, strong) NSMutableArray <JDReorderOperation *> *operations;
 @property (nonatomic, assign) JDReorderStatus status;
 @end
 
@@ -32,6 +45,7 @@
     _enableReordering = enableReordering;
     if (!self.longPressGes.view) {
         [self addGestureRecognizer:self.longPressGes];
+//        _operations = [NSMutableArray array];
     }
     self.longPressGes.enabled = _enableReordering;
 }
@@ -98,10 +112,8 @@
     }];
 }
 
+
 - (void)handleLocationEnded:(CGPoint)location {
-//    if (_inSwap) {
-//        _shouldCancelMove = YES;
-//    }
     UICollectionViewCell *toCell;
     NSLog(@"swap in process: %d", _inSwap);
     if (_status == JDReorderStatusMoved) {
@@ -111,10 +123,9 @@
     } else {
         toCell = [self cellForItemAtIndexPath:_currentIndexPath];
     }
-//    UICollectionViewCell *toCell = [self cellForItemAtIndexPath:_currentIndexPath];
-//    if ([toCell respondsToSelector:@selector(willEndDragging)]) {
-//        [(id)toCell willEndDragging];
-//    }
+    if ([toCell respondsToSelector:@selector(willEndDragging)]) {
+        [(id)toCell willEndDragging];
+    }
     
     CGRect endFrame = [toCell.superview convertRect:[toCell frame] toView:self];
     
@@ -138,18 +149,20 @@
     _snapshotView.center = location;
     NSIndexPath *newIp = [self indexPathForItemAtPoint:location];
     if (!newIp) return;
-//    NSLog(@"new: %d current: %d\n", newIp.item, _currentIndexPath.item);
-    if (![newIp isEqual:_currentIndexPath] && !_inSwap) {
+    if (![newIp isEqual:_currentIndexPath] ) { //}&& !_inSwap) {
         
-        _inSwap = YES;
         [self performBatchUpdates:^{
+        
+            if (_status == JDReorderStatusMoved) {
+                [self moveItemAtIndexPath:_tmpIndexPath toIndexPath:newIp];
+            } else {
+                [self moveItemAtIndexPath:_currentIndexPath toIndexPath:newIp];
+            }
             _tmpIndexPath = newIp;
             _status = JDReorderStatusMoved;
-            [self moveItemAtIndexPath:_currentIndexPath toIndexPath:newIp];
         } completion:^(BOOL finished) {
             NSLog(@"finished: %d", finished);
-            _currentIndexPath = newIp;
-            _inSwap = NO;
+            _currentIndexPath = _tmpIndexPath;
             _status = JDReorderStatusCompleted;
         }];
     }

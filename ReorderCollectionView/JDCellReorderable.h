@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 //- (void)quitRecorderingMode;
 
 - (void)willBeginDragging;
+- (void)willEndDragging;
 - (void)didEndDragging;
 @end
 
