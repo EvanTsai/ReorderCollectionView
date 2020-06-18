@@ -11,11 +11,8 @@
 NS_ASSUME_NONNULL_BEGIN
 
 @protocol JDCellReorderable <NSObject>
-
+@optional
 - (UIView *)snapshotViewForReordering;
-//- (void)enterReorderingMode;
-//- (void)quitRecorderingMode;
-
 - (void)willBeginDragging;
 - (void)willEndDragging;
 - (void)didEndDragging;

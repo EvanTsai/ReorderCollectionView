@@ -32,6 +32,7 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
 @property (nonatomic, assign) NSInteger lastEdge;
 @property (nonatomic, assign) NSTimeInterval edgeTestBeginTime;
 @property (nonatomic, strong) CADisplayLink *displayLink;
+@property (nonatomic, strong) UISelectionFeedbackGenerator *feedbackGen;
 @end
 
 @implementation JDReorderCollectionView
@@ -43,6 +44,14 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
         [self addGestureRecognizer:self.longPressGes];
     }
     self.longPressGes.enabled = _enableReordering;
+}
+
+- (UISelectionFeedbackGenerator *)feedbackGen {
+    if (!_feedbackGen) {
+        _feedbackGen = [UISelectionFeedbackGenerator new];
+        [_feedbackGen prepare];
+    }
+    return _feedbackGen;
 }
 
 - (void)handleLongPressGes:(UIPanGestureRecognizer *)longPressGes {
@@ -95,7 +104,7 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
     if ([fromCell respondsToSelector:@selector(willBeginDragging)]) {
         [(id)fromCell willBeginDragging];
     }
-    
+    if (_needsHapticFeedback) [self.feedbackGen selectionChanged];
     [UIView animateWithDuration:kAttachAnimationDuration delay:0 options:UIViewAnimationOptionCurveEaseInOut animations:^{
         _snapshotView.center = location;
     } completion:^(BOOL finished) {
@@ -141,6 +150,10 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
             [self moveItemAtIndexPath:_currentIndexPath toIndexPath:newIp];
             [self.dataSource collectionView:self moveItemAtIndexPath:_currentIndexPath toIndexPath:newIp];
             _currentIndexPath = newIp;
+            if (_needsHapticFeedback) {
+                [self.feedbackGen selectionChanged];
+                [self.feedbackGen prepare];
+            }
         } completion:^(BOOL finished) {
             NSLog(@"finished: %d", finished);
         }];
@@ -151,7 +164,7 @@ typedef NS_ENUM(NSUInteger, JDEdgeState) {
 - (void)handleEdgeCasesWithPoint:(CGPoint)point {
 
     CGPoint relativePoint = [self convertPoint:point toView:self.window];
-    CGRect selfRect = [self.superview convertRect:self.frame fromView:self.window];
+    CGRect selfRect = [self.superview convertRect:self.frame toView:self.window];
     if (!CGRectContainsPoint(selfRect, relativePoint)) return;
     
     CGFloat maxX = CGRectGetMaxX(selfRect);

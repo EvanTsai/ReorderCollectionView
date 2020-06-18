@@ -11,23 +11,6 @@
 NS_ASSUME_NONNULL_BEGIN
 
 
-@protocol JDReorderCellDelegate <NSObject>
-
-@optional
-- (UIView *)snapshotViewForReordering;
-- (void)willBeginDragging;
-//- (void)didBeginDragging;
-//- (void)willEndDragging;
-- (void)didEndDragging;
-@end
-
-
-typedef NS_ENUM(NSUInteger, JDReorderStatus) {
-    JDReorderStatusIdle,
-    JDReorderStatusMoved,       // 动画完成了，但是没有调用回调
-    JDReorderStatusCompleted,   // 回调结束
-};
-
 @interface JDReorderCollectionView : UICollectionView
 
 @property (nonatomic, assign) BOOL enableReordering;

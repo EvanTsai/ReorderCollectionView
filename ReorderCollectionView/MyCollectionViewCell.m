@@ -42,14 +42,6 @@
     _label.text = model;
 }
 
-//- (void)enterReorderingMode {
-//    self.contentView.hidden = YES;
-//}
-//
-//- (void)quitRecorderingMode {
-//    self.contentView.hidden = NO;
-//}
-
 - (void)willBeginDragging {
     self.contentView.hidden = YES;
 }
